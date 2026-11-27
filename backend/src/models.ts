@@ -2,8 +2,11 @@ import mongoose, { Schema } from "mongoose";
 
 export const fuelCodes = [
   "E5_RON_92",
+  "E10_RON_95_III",
+  "E10_RON_95_V",
   "RON_95_III",
   "RON_95_V",
+  "DIESEL_001S",
   "DIESEL_005S",
   "KEROSENE",
   "MAZUT_180CST_35S",

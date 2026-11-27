@@ -72,6 +72,63 @@ describe("upstream normalization", () => {
       },
     ]);
   });
+  it("normalizes the current Petrolimex product names without merging fuel grades", () => {
+    const rows = normalizePayload({
+      meta: { priceDate: "2026-11-26" },
+      data: [
+        { name: "Dầu hỏa 2-K", region1: 1000, region2: 1100, unit: "VND/lít" },
+        {
+          name: "DO 0,001S Mức 5",
+          region1: 1200,
+          region2: 1300,
+          unit: "VND/lít",
+        },
+        {
+          name: "DO 0,05S Mức 2",
+          region1: 1400,
+          region2: 1500,
+          unit: "VND/lít",
+        },
+        {
+          name: "Xăng E10 RON 95 Mức 3",
+          region1: 1600,
+          region2: 1700,
+          unit: "VND/lít",
+        },
+        {
+          name: "Xăng E10 RON 95 Mức 5",
+          region1: 1800,
+          region2: 1900,
+          unit: "VND/lít",
+        },
+        {
+          name: "Xăng E5 RON 92 Mức 2",
+          region1: 2000,
+          region2: 2100,
+          unit: "VND/lít",
+        },
+      ],
+    });
+
+    expect(
+      rows
+        .filter((row) => row.region === "REGION_1")
+        .map((row) => row.fuelCode),
+    ).toEqual([
+      "KEROSENE",
+      "DIESEL_001S",
+      "DIESEL_005S",
+      "E10_RON_95_III",
+      "E10_RON_95_V",
+      "E5_RON_92",
+    ]);
+    expect(rows).toHaveLength(12);
+    expect(rows[7]).toMatchObject({
+      fuelCode: "E10_RON_95_III",
+      region: "REGION_2",
+      effectiveDate: "2026-11-26",
+    });
+  });
   it("maps known fuel names and keeps mazut in kilograms", () => {
     expect(
       normalizePayload([

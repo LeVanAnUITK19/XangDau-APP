@@ -13,8 +13,11 @@ final money = NumberFormat('#,##0', 'vi_VN');
 String titleOf(String code) =>
     const {
       'E5_RON_92': 'Xăng E5 RON 92',
+      'E10_RON_95_III': 'Xăng E10 RON 95-III',
+      'E10_RON_95_V': 'Xăng E10 RON 95-V',
       'RON_95_III': 'Xăng RON 95-III',
       'RON_95_V': 'Xăng RON 95-V',
+      'DIESEL_001S': 'Dầu diesel 0,001S (Mức 5)',
       'DIESEL_005S': 'Dầu diesel 0.05S',
       'KEROSENE': 'Dầu hỏa',
       'MAZUT_180CST_35S': 'Dầu mazut 180CST 3.5S',
@@ -322,7 +325,7 @@ class AnalyticsScreen extends StatefulWidget {
 }
 
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
-  String fuel = 'RON_95_III';
+  String fuel = 'E10_RON_95_III';
   String period = '30d';
   String region = 'REGION_1';
   bool comparisonMode = false;
@@ -428,8 +431,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 initialValue: fuel,
                 decoration: const InputDecoration(labelText: 'Nhiên liệu'),
                 items: const [
+                  'E10_RON_95_III',
+                  'E10_RON_95_V',
                   'RON_95_III',
+                  'RON_95_V',
                   'E5_RON_92',
+                  'DIESEL_001S',
                   'DIESEL_005S',
                   'KEROSENE'
                 ]
@@ -528,7 +535,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   final consumption = TextEditingController(text: '7.5');
   final monthly = TextEditingController(text: '1200');
   final price = TextEditingController();
-  late String fuel = widget.initialFuel ?? 'RON_95_III';
+  late String fuel = widget.initialFuel ?? 'E10_RON_95_III';
   late String region = widget.initialRegion ?? 'REGION_1';
   FuelEstimate? result;
   String? error;
@@ -619,7 +626,15 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
           DropdownButtonFormField<String>(
             initialValue: fuel,
             decoration: const InputDecoration(labelText: 'Loại nhiên liệu'),
-            items: const ['RON_95_III', 'E5_RON_92', 'DIESEL_005S', 'KEROSENE']
+            items: const [
+              'E10_RON_95_III',
+              'E10_RON_95_V',
+              'RON_95_III',
+              'E5_RON_92',
+              'DIESEL_001S',
+              'DIESEL_005S',
+              'KEROSENE',
+            ]
                 .map((code) =>
                     DropdownMenuItem(value: code, child: Text(titleOf(code))))
                 .toList(),
