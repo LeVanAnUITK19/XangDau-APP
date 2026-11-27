@@ -9,7 +9,13 @@ import mongoose from "mongoose";
 import { config } from "./config";
 import { Device, fuels, LatestPrice, PriceRecord, SyncState } from "./models";
 
-export const logger = pino({ level: config.LOG_LEVEL });
+export const logger = pino({
+  level: config.LOG_LEVEL,
+  redact: {
+    paths: ["req.headers.authorization", "req.headers.cookie"],
+    censor: "[REDACTED]",
+  },
+});
 export const app = express();
 app.disable("x-powered-by");
 app.use(helmet());

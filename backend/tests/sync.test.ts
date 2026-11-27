@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import mongoose from "mongoose";
 import { normalizePayload } from "../src/sync";
 
 describe("upstream normalization", () => {
@@ -94,5 +95,25 @@ describe("upstream normalization", () => {
     expect(() =>
       normalizePayload([{ code: "X", price: -1, region: "Vùng 1" }]),
     ).toThrow();
+  });
+});
+
+describe("sync lock filter", () => {
+  it("preserves its internal date operator when Mongoose sanitizes filters", () => {
+    const now = new Date("2026-11-27T12:00:00.000Z");
+    const filter = {
+      key: "prices",
+      $or: [
+        { lockedUntil: mongoose.trusted({ $lt: now }) },
+        { lockedUntil: null },
+      ],
+    };
+
+    const sanitized = mongoose.sanitizeFilter(filter);
+    const lockUntil = (sanitized.$or as Array<{ lockedUntil: unknown }>)[0]
+      ?.lockedUntil;
+
+    expect(lockUntil).toMatchObject({ $lt: now });
+    expect(lockUntil).not.toHaveProperty("$eq");
   });
 });

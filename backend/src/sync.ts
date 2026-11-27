@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import mongoose from "mongoose";
 import { config } from "./config";
 import {
   fuels,
@@ -143,7 +144,10 @@ export async function syncPrices(fetcher: typeof fetch = fetch): Promise<{
   const lock = await SyncState.findOneAndUpdate(
     {
       key: "prices",
-      $or: [{ lockedUntil: { $lt: new Date() } }, { lockedUntil: null }],
+      $or: [
+        { lockedUntil: mongoose.trusted({ $lt: new Date() }) },
+        { lockedUntil: null },
+      ],
     },
     { $set: { lockedUntil: new Date(Date.now() + 120_000) } },
     { upsert: true, new: true },
