@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:gia_xang_dau/app.dart';
@@ -32,7 +34,7 @@ String formatPrice(num price, String unit) =>
 String formatUpdatedAt(Object? value) {
   final parsed = value == null ? null : DateTime.tryParse(value.toString());
   return parsed == null
-      ? 'Chưa có lần đồng bộ thành công'
+      ? 'Chưa có cập nhật'
       : DateFormat('dd/MM/yyyy HH:mm').format(parsed.toLocal());
 }
 
@@ -127,7 +129,33 @@ class _PricesScreenState extends State<PricesScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(
-          title: const Text('Giá xăng dầu'),
+          toolbarHeight: 76,
+          title: FutureBuilder<Map<String, dynamic>>(
+            future: future,
+            builder: (context, snapshot) {
+              final meta = snapshot.data?['meta'] as Map?;
+              final updateLabel = snapshot.hasData
+                  ? 'Cập nhật: ${formatUpdatedAt(meta?['lastSuccessfulSyncAt'])}'
+                  : snapshot.hasError
+                      ? 'Chưa rõ thời điểm cập nhật'
+                      : 'Đang tải thời điểm cập nhật…';
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    updateLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Colors.white70,
+                        ),
+                  ),
+                  const Text('Giá xăng dầu'),
+                ],
+              );
+            },
+          ),
           actions: [
             IconButton(
               tooltip: 'So sánh Vùng 1 và Vùng 2',
@@ -180,10 +208,6 @@ class _PricesScreenState extends State<PricesScreen> {
                     if ((response['meta'] as Map?)?['stale'] == true)
                       const Notice(
                           text: 'Dữ liệu có thể đã cũ. Kéo xuống để cập nhật.'),
-                    _PriceUpdateCard(
-                      meta: response['meta'] as Map? ?? const {},
-                      currentPrice: rows.first,
-                    ),
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 10),
                       child: Text('Giá nhiên liệu hiện tại',
@@ -247,30 +271,6 @@ class FuelTile extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _PriceUpdateCard extends StatelessWidget {
-  const _PriceUpdateCard({required this.meta, required this.currentPrice});
-
-  final Map meta;
-  final Map currentPrice;
-
-  @override
-  Widget build(BuildContext context) {
-    final source = meta['source'] ?? currentPrice['source'];
-    return Card(
-      color: greenLight,
-      child: ListTile(
-        leading: const Icon(Icons.schedule, color: green),
-        title: const Text('Thời điểm dữ liệu'),
-        subtitle: Text([
-          'Đồng bộ gần nhất: ${formatUpdatedAt(meta['lastSuccessfulSyncAt'])}',
-          'Giá có hiệu lực từ: ${formatEffectiveDate(currentPrice['effectiveDate'] ?? currentPrice['effectiveAt'])}',
-          if (source != null) 'Nguồn: $source',
-        ].join('\n')),
       ),
     );
   }
@@ -896,6 +896,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
+  Future<void> _refreshMetadata() async {
+    Map<String, dynamic>? metadata;
+    var metadataUnavailable = false;
+    try {
+      metadata = await api.cachedGet('/api/v1/metadata');
+    } on Object {
+      metadataUnavailable = true;
+    }
+    if (!mounted) return;
+    setState(() {
+      _metadata = metadata;
+      _metadataUnavailable = metadataUnavailable;
+    });
+  }
+
   Future<void> _chooseRegion(String? selected) async {
     if (selected == null || selected == region) return;
     final prefs = await SharedPreferences.getInstance();
@@ -904,6 +919,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _setNotificationsEnabled(bool enabled) async {
+    if (enabled && !_serverPushAvailable) {
+      setState(() => _savingNotifications = true);
+      await _refreshMetadata();
+      if (!mounted) return;
+      setState(() => _savingNotifications = false);
+    }
     if (enabled &&
         (!_serverPushAvailable || !pushNotifications.isFirebaseReady)) {
       await _showFirebaseSetup();
@@ -988,6 +1009,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   String _friendlyPushError(Object error) {
     if (error is StateError) return error.message.toString();
+    if (error is FirebaseException) {
+      final details = error.message?.trim();
+      return details == null || details.isEmpty
+          ? 'Firebase không cấp được mã nhận thông báo (${error.code}). '
+              'Kiểm tra ứng dụng Android và Project ID.'
+          : 'Firebase không cấp được mã nhận thông báo: $details';
+    }
+    if (error is DioException) {
+      final body = error.response?.data;
+      final apiError = body is Map ? body['error'] : null;
+      final message = apiError is Map ? apiError['message'] : null;
+      if (message is String && message.trim().isNotEmpty) return message;
+      final statusCode = error.response?.statusCode;
+      if (statusCode != null) {
+        return 'Máy chủ từ chối đăng ký thông báo (HTTP $statusCode).';
+      }
+      return 'Không kết nối được máy chủ để đăng ký thông báo. Kiểm tra mạng rồi thử lại.';
+    }
     return 'Không lưu được cài đặt thông báo. Kiểm tra kết nối rồi thử lại.';
   }
 

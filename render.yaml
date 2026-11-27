@@ -19,7 +19,7 @@ services:
       - key: SYNC_SECRET
         sync: false
       - key: FIREBASE_ENABLED
-        value: "false"
+        sync: false
       - key: FIREBASE_PROJECT_ID
         sync: false
       - key: FIREBASE_SERVICE_ACCOUNT_JSON_BASE64
