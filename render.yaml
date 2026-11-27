@@ -15,7 +15,7 @@ services:
       - key: MONGODB_DB_NAME
         value: viet_fuel
       - key: UPSTREAM_BASE_URL
-        value: https://vietfuel-api.tranqui.workers.dev
+        value: https://vietfuel-api.levanan1902006.workers.dev
       - key: SYNC_SECRET
         sync: false
       - key: FIREBASE_ENABLED
