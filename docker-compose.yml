@@ -1,0 +1,29 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "3000:3000"
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongodb:27017/viet_fuel?directConnection=true}
+      MONGODB_DB_NAME: viet_fuel
+    depends_on:
+      mongodb:
+        condition: service_healthy
+  mongodb:
+    image: mongo:8
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+volumes:
+  mongo-data:

@@ -1,0 +1,30 @@
+name: Fuel price sync
+on:
+  schedule:
+    - cron: '17 */2 * * *'
+  workflow_dispatch:
+concurrency:
+  group: fuel-price-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call protected sync endpoint
+        env:
+          BACKEND_URL: ${{ vars.BACKEND_URL }}
+          SYNC_SECRET: ${{ secrets.SYNC_SECRET }}
+        run: |
+          test -n "$BACKEND_URL" || { echo 'BACKEND_URL variable is required'; exit 1; }
+          test -n "$SYNC_SECRET" || { echo 'SYNC_SECRET secret is required'; exit 1; }
+          for attempt in 1 2 3; do
+            code=$(curl --silent --show-error --max-time 120 --output response.json --write-out '%{http_code}' \
+              --request POST "$BACKEND_URL/api/v1/internal/sync" \
+              --header "Authorization: Bearer $SYNC_SECRET" --header 'Content-Type: application/json' --data '{}') || code=000
+            if [ "$code" -ge 200 ] && [ "$code" -lt 300 ]; then cat response.json; exit 0; fi
+            if [ "$code" = 401 ] || [ "$code" = 403 ]; then echo "Sync authorization failed ($code)"; exit 1; fi
+            if [ "$attempt" -lt 3 ]; then sleep $((attempt * 15)); fi
+          done
+          echo "Sync failed after retries (HTTP $code)"
+          cat response.json || true
+          exit 1
