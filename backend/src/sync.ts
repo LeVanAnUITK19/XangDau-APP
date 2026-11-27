@@ -301,13 +301,12 @@ export async function syncPrices(fetcher: typeof fetch = fetch): Promise<{
         },
         { upsert: true, new: true },
       );
-      if (
-        prior &&
-        change !== null &&
-        change !== 0 &&
-        item.effectiveAt &&
-        item.effectiveAt <= observedAt
-      ) {
+      if (prior && change !== null && change !== 0) {
+        const notificationEffectiveAt =
+          item.effectiveAt ??
+          (item.effectiveDate
+            ? new Date(`${item.effectiveDate}T00:00:00.000Z`)
+            : observedAt);
         await NotificationEvent.updateOne(
           { eventKey: recordKey },
           {
@@ -321,7 +320,7 @@ export async function syncPrices(fetcher: typeof fetch = fetch): Promise<{
               newPrice: item.price,
               priceChange: change,
               direction: change > 0 ? "increase" : "decrease",
-              effectiveAt: item.effectiveAt,
+              effectiveAt: notificationEffectiveAt,
               status: "pending",
               attempts: 0,
               nextAttemptAt: observedAt,

@@ -5,6 +5,7 @@ import 'features/screens.dart';
 const green = Color(0xff008744);
 const greenDark = Color(0xff005c43);
 const greenLight = Color(0xffe8f7ef);
+final appScaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 final router = GoRouter(initialLocation: '/prices', routes: [
   StatefulShellRoute.indexedStack(
     builder: (context, state, shell) => AppShell(shell: shell),
@@ -40,6 +41,7 @@ class GiaXangDauApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp.router(
       title: 'Giá Xăng Dầu',
       debugShowCheckedModeBanner: false,
+      scaffoldMessengerKey: appScaffoldMessengerKey,
       theme: ThemeData(
           useMaterial3: true,
           scaffoldBackgroundColor: const Color(0xfff5f7f8),

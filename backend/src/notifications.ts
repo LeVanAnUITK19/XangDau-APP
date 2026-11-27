@@ -1,6 +1,18 @@
 import { Device, NotificationEvent } from "./models";
 import { firebaseMessaging } from "./firebase";
 
+const fuelNames: Record<string, string> = {
+  E5_RON_92: "xăng E5 RON 92",
+  E10_RON_95_III: "xăng E10 RON 95-III",
+  E10_RON_95_V: "xăng E10 RON 95-V",
+  RON_95_III: "xăng RON 95-III",
+  RON_95_V: "xăng RON 95-V",
+  DIESEL_001S: "dầu diesel 0,001S",
+  DIESEL_005S: "dầu diesel 0,05S",
+  KEROSENE: "dầu hỏa",
+  MAZUT_180CST_35S: "dầu mazut 180CST 3.5S",
+};
+
 export async function dispatchPending(limit = 100) {
   const messaging = firebaseMessaging();
   if (!messaging) {
@@ -60,8 +72,8 @@ export async function dispatchPending(limit = 100) {
         const response = await messaging.sendEachForMulticast({
           tokens,
           notification: {
-            title: `Giá ${event.fuelCode} ${event.direction === "increase" ? "tăng" : "giảm"}`,
-            body: `Giá mới: ${event.newPrice.toLocaleString("vi-VN")} đ/${event.fuelCode.startsWith("MAZUT") ? "kg" : "lít"} tại ${event.region === "REGION_1" ? "Vùng 1" : "Vùng 2"}.`,
+            title: `Giá ${fuelNames[event.fuelCode] ?? event.fuelCode} ${event.direction === "increase" ? "tăng" : "giảm"}`,
+            body: `Thay đổi ${Math.abs(event.priceChange).toLocaleString("vi-VN")} đ; giá mới ${event.newPrice.toLocaleString("vi-VN")} đ/${event.fuelCode.startsWith("MAZUT") ? "kg" : "lít"} tại ${event.region === "REGION_1" ? "Vùng 1" : "Vùng 2"}.`,
           },
           data: {
             eventId: String(event._id),

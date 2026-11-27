@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:gia_xang_dau/app.dart';
 import 'package:gia_xang_dau/core/api.dart';
 import 'package:gia_xang_dau/core/calculator.dart';
+import 'package:gia_xang_dau/core/push_notifications.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 final api = FuelApi();
@@ -26,6 +28,26 @@ String titleOf(String code) =>
 
 String formatPrice(num price, String unit) =>
     '${money.format(price)} đ/${unit == 'kg' ? 'kg' : 'L'}';
+
+String formatUpdatedAt(Object? value) {
+  final parsed = value == null ? null : DateTime.tryParse(value.toString());
+  return parsed == null
+      ? 'Chưa có lần đồng bộ thành công'
+      : DateFormat('dd/MM/yyyy HH:mm').format(parsed.toLocal());
+}
+
+String formatEffectiveDate(Object? value) {
+  if (value == null) return 'Chưa xác định';
+  final raw = value.toString();
+  final dateOnly = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(raw);
+  if (dateOnly != null) {
+    return '${dateOnly.group(3)}/${dateOnly.group(2)}/${dateOnly.group(1)}';
+  }
+  final parsed = DateTime.tryParse(raw);
+  return parsed == null
+      ? 'Chưa xác định'
+      : DateFormat('dd/MM/yyyy').format(parsed.toLocal());
+}
 
 class PricesScreen extends StatefulWidget {
   const PricesScreen({super.key});
@@ -155,9 +177,13 @@ class _PricesScreenState extends State<PricesScreen> {
                   children: [
                     if (response['_cached'] == true)
                       const Notice(text: 'Đang xem dữ liệu đã lưu trên máy.'),
-                    if (response['meta']?['stale'] == true)
+                    if ((response['meta'] as Map?)?['stale'] == true)
                       const Notice(
                           text: 'Dữ liệu có thể đã cũ. Kéo xuống để cập nhật.'),
+                    _PriceUpdateCard(
+                      meta: response['meta'] as Map? ?? const {},
+                      currentPrice: rows.first,
+                    ),
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 10),
                       child: Text('Giá nhiên liệu hiện tại',
@@ -221,6 +247,30 @@ class FuelTile extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _PriceUpdateCard extends StatelessWidget {
+  const _PriceUpdateCard({required this.meta, required this.currentPrice});
+
+  final Map meta;
+  final Map currentPrice;
+
+  @override
+  Widget build(BuildContext context) {
+    final source = meta['source'] ?? currentPrice['source'];
+    return Card(
+      color: greenLight,
+      child: ListTile(
+        leading: const Icon(Icons.schedule, color: green),
+        title: const Text('Thời điểm dữ liệu'),
+        subtitle: Text([
+          'Đồng bộ gần nhất: ${formatUpdatedAt(meta['lastSuccessfulSyncAt'])}',
+          'Giá có hiệu lực từ: ${formatEffectiveDate(currentPrice['effectiveDate'] ?? currentPrice['effectiveAt'])}',
+          if (source != null) 'Nguồn: $source',
+        ].join('\n')),
       ),
     );
   }
@@ -348,21 +398,40 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   String period = '30d';
   String region = 'REGION_1';
   bool comparisonMode = false;
+  late Future<Map<String, dynamic>> future;
 
-  Future<Map<String, dynamic>> get data => comparisonMode
+  @override
+  void initState() {
+    super.initState();
+    future = _load();
+  }
+
+  Future<Map<String, dynamic>> _load() => comparisonMode
       ? api.cachedGet('/api/v1/analytics/compare',
           query: {'region': region, 'unit': 'liter'})
       : api.cachedGet('/api/v1/history',
           query: {'fuelCode': fuel, 'region': region, 'period': period});
 
+  void _update(VoidCallback change) {
+    setState(() {
+      change();
+      future = _load();
+    });
+  }
+
+  void _retry() => _update(() {});
+
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('Biểu đồ & phân tích')),
         body: FutureBuilder<Map<String, dynamic>>(
-          future: data,
+          future: future,
           builder: (context, snapshot) {
             if (snapshot.hasError) {
-              return const ErrorState(message: 'Không tải được lịch sử giá.');
+              return ErrorState(
+                message: 'Không tải được lịch sử giá. Thử tải lại sau.',
+                retry: _retry,
+              );
             }
             if (!snapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
@@ -379,7 +448,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   ],
                   selected: {true},
                   onSelectionChanged: (_) =>
-                      setState(() => comparisonMode = false),
+                      _update(() => comparisonMode = false),
                 ),
                 const SizedBox(height: 12),
                 if (fuels.isEmpty)
@@ -434,8 +503,18 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             }
             final data = rawData as Map;
             final rows = (data['items'] as List? ?? []).cast<Map>();
-            final availablePeriods =
-                (data['availablePeriods'] as List? ?? []).cast<String>();
+            final prices =
+                rows.map((row) => (row['price'] as num).toDouble()).toList();
+            final lowestPrice = prices.isEmpty
+                ? 0.0
+                : prices.reduce((left, right) => left < right ? left : right);
+            final highestPrice = prices.isEmpty
+                ? 1.0
+                : prices.reduce((left, right) => left > right ? left : right);
+            final yPadding =
+                (highestPrice - lowestPrice) * 0.15 > highestPrice * 0.01
+                    ? (highestPrice - lowestPrice) * 0.15
+                    : (highestPrice == 0 ? 1.0 : highestPrice * 0.01);
             return ListView(padding: const EdgeInsets.all(16), children: [
               SegmentedButton<bool>(
                 segments: const [
@@ -443,8 +522,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   ButtonSegment(value: true, label: Text('So sánh nhiên liệu')),
                 ],
                 selected: {false},
-                onSelectionChanged: (_) =>
-                    setState(() => comparisonMode = true),
+                onSelectionChanged: (_) => _update(() => comparisonMode = true),
               ),
               DropdownButtonFormField<String>(
                 initialValue: fuel,
@@ -462,7 +540,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                     .map((code) => DropdownMenuItem(
                         value: code, child: Text(titleOf(code))))
                     .toList(),
-                onChanged: (value) => setState(() => fuel = value!),
+                onChanged: (value) => _update(() => fuel = value!),
               ),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
@@ -472,7 +550,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   DropdownMenuItem(value: 'REGION_1', child: Text('Vùng 1')),
                   DropdownMenuItem(value: 'REGION_2', child: Text('Vùng 2')),
                 ],
-                onChanged: (value) => setState(() => region = value!),
+                onChanged: (value) => _update(() => region = value!),
               ),
               const SizedBox(height: 10),
               Wrap(spacing: 8, children: [
@@ -485,54 +563,94 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   ChoiceChip(
                     label: Text(entry.value),
                     selected: period == entry.key,
-                    onSelected: availablePeriods.contains(entry.key)
-                        ? (_) => setState(() => period = entry.key)
-                        : null,
+                    onSelected: (_) => _update(() => period = entry.key),
                   ),
               ]),
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
-                  child: rows.length < 2 || data['coverageComplete'] != true
+                  child: rows.isEmpty
                       ? const SizedBox(
                           height: 240,
                           child: Center(
+                              child: Text('Chưa có mốc giá lịch sử để vẽ')))
+                      : Column(children: [
+                          SizedBox(
+                            height: 270,
+                            child: LineChart(LineChartData(
+                              minX: 0,
+                              maxX: rows.length > 1 ? rows.length - 1 : 1,
+                              minY: (lowestPrice - yPadding)
+                                  .clamp(0, double.infinity)
+                                  .toDouble(),
+                              maxY: highestPrice + yPadding,
+                              gridData: const FlGridData(show: true),
+                              titlesData: FlTitlesData(
+                                leftTitles: const AxisTitles(
+                                    sideTitles: SideTitles(
+                                        showTitles: true, reservedSize: 56)),
+                                bottomTitles: AxisTitles(
+                                  sideTitles: SideTitles(
+                                    showTitles: true,
+                                    interval: rows.length > 5
+                                        ? (rows.length - 1) / 4
+                                        : 1,
+                                    reservedSize: 34,
+                                    getTitlesWidget: (value, meta) {
+                                      final index = value.round();
+                                      if ((value - index).abs() > 0.001 ||
+                                          index < 0 ||
+                                          index >= rows.length) {
+                                        return const SizedBox.shrink();
+                                      }
+                                      return SideTitleWidget(
+                                        meta: meta,
+                                        child: Text(
+                                          formatEffectiveDate(
+                                            rows[index]['effectiveDate'] ??
+                                                rows[index]['effectiveAt'],
+                                          ),
+                                          style: const TextStyle(fontSize: 10),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                                topTitles: const AxisTitles(
+                                    sideTitles: SideTitles(showTitles: false)),
+                                rightTitles: const AxisTitles(
+                                    sideTitles: SideTitles(showTitles: false)),
+                              ),
+                              lineBarsData: [
+                                LineChartBarData(
+                                  isStepLineChart: true,
+                                  spots: [
+                                    for (var i = 0; i < rows.length; i++)
+                                      FlSpot(i.toDouble(),
+                                          (rows[i]['price'] as num).toDouble())
+                                  ],
+                                  color: green,
+                                  barWidth: rows.length > 1 ? 3 : 0,
+                                  dotData: const FlDotData(show: true),
+                                  belowBarData: BarAreaData(
+                                      show: rows.length > 1, color: greenLight),
+                                )
+                              ],
+                            )),
+                          ),
+                          if (rows.length < 2)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 8),
                               child: Text(
-                                  'Chưa đủ dữ liệu lịch sử để vẽ biểu đồ')))
-                      : SizedBox(
-                          height: 270,
-                          child: LineChart(LineChartData(
-                            gridData: const FlGridData(show: true),
-                            titlesData: const FlTitlesData(
-                              leftTitles: AxisTitles(
-                                  sideTitles: SideTitles(
-                                      showTitles: true, reservedSize: 56)),
-                              bottomTitles: AxisTitles(
-                                  sideTitles: SideTitles(
-                                      showTitles: true, reservedSize: 28)),
+                                  'Mới có 1 mốc giá đã xác nhận; biểu đồ xu hướng sẽ hiện khi có thêm kỳ giá.'),
                             ),
-                            lineBarsData: [
-                              LineChartBarData(
-                                isStepLineChart: true,
-                                spots: [
-                                  for (var i = 0; i < rows.length; i++)
-                                    FlSpot(i.toDouble(),
-                                        (rows[i]['price'] as num).toDouble())
-                                ],
-                                color: green,
-                                barWidth: 3,
-                                dotData: const FlDotData(show: true),
-                                belowBarData:
-                                    BarAreaData(show: true, color: greenLight),
-                              )
-                            ],
-                          )),
-                        ),
+                        ]),
                 ),
               ),
-              const Notice(
-                  text:
-                      'Biểu đồ dùng các kỳ giá đã ghi nhận; không nội suy khoảng trống.'),
+              if (data['coverageComplete'] != true)
+                const Notice(
+                    text:
+                        'Lịch sử hiện chưa đầy đủ. Biểu đồ chỉ dùng các mốc giá đã ghi nhận.'),
               Text(
                   'Phạm vi dữ liệu: ${data['earliestAvailableDate'] ?? '—'} → ${data['latestAvailableDate'] ?? '—'}'),
             ]);
@@ -735,6 +853,17 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   String region = 'REGION_1';
+  PushNotificationPreferences _notificationPreferences =
+      PushNotificationPreferences.defaults('REGION_1');
+  Map<String, dynamic>? _metadata;
+  String? _appVersion;
+  bool _loading = true;
+  bool _savingNotifications = false;
+  bool _metadataUnavailable = false;
+
+  bool get _serverPushAvailable =>
+      _metadata?['_cached'] != true &&
+      _metadata?['notificationsAvailable'] == true;
 
   @override
   void initState() {
@@ -744,75 +873,381 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
-    if (mounted) {
-      setState(() => region = prefs.getString('region.default') ?? 'REGION_1');
+    final savedRegion = prefs.getString('region.default') ?? 'REGION_1';
+    final notificationPreferences = await pushNotifications.loadPreferences(
+      fallbackRegion: savedRegion,
+    );
+    final packageInfo = await PackageInfo.fromPlatform();
+    Map<String, dynamic>? metadata;
+    var metadataUnavailable = false;
+    try {
+      metadata = await api.cachedGet('/api/v1/metadata');
+    } on Object {
+      metadataUnavailable = true;
+    }
+    if (!mounted) return;
+    setState(() {
+      region = savedRegion;
+      _notificationPreferences = notificationPreferences;
+      _metadata = metadata;
+      _metadataUnavailable = metadataUnavailable;
+      _appVersion = '${packageInfo.version} (${packageInfo.buildNumber})';
+      _loading = false;
+    });
+  }
+
+  Future<void> _chooseRegion(String? selected) async {
+    if (selected == null || selected == region) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('region.default', selected);
+    if (mounted) setState(() => region = selected);
+  }
+
+  Future<void> _setNotificationsEnabled(bool enabled) async {
+    if (enabled &&
+        (!_serverPushAvailable || !pushNotifications.isFirebaseReady)) {
+      await _showFirebaseSetup();
+      return;
+    }
+    if (enabled && _notificationPreferences.fuelCodes.isEmpty) {
+      _showMessage('Hãy chọn ít nhất một loại nhiên liệu.');
+      return;
+    }
+    setState(() => _savingNotifications = true);
+    try {
+      if (enabled) {
+        await pushNotifications.enable(_notificationPreferences);
+      } else {
+        await pushNotifications.disable(_notificationPreferences);
+      }
+      if (mounted) {
+        setState(() {
+          _notificationPreferences =
+              _notificationPreferences.copyWith(enabled: enabled);
+          _savingNotifications = false;
+        });
+      }
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          if (!enabled) {
+            _notificationPreferences =
+                _notificationPreferences.copyWith(enabled: false);
+          }
+          _savingNotifications = false;
+        });
+        _showMessage(_friendlyPushError(error));
+      }
     }
   }
 
-  Future<void> _chooseRegion() async {
-    final selected = await showModalBottomSheet<String>(
+  Future<void> _saveNotificationPreferences(
+    PushNotificationPreferences next,
+  ) async {
+    final previous = _notificationPreferences;
+    setState(() => _notificationPreferences = next);
+    try {
+      await pushNotifications.savePreferences(next);
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() => _notificationPreferences = previous);
+      _showMessage(_friendlyPushError(error));
+    }
+  }
+
+  Future<void> _showFirebaseSetup() async {
+    final appMissing = !pushNotifications.isFirebaseReady;
+    await showDialog<void>(
       context: context,
-      builder: (context) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(
-              title: const Text('Toàn quốc (Vùng 1)'),
-              onTap: () => Navigator.pop(context, 'REGION_1')),
-          ListTile(
-              title: const Text('Vùng 2'),
-              onTap: () => Navigator.pop(context, 'REGION_2')),
-        ]),
+      builder: (context) => AlertDialog(
+        title: Text(appMissing
+            ? 'Ứng dụng chưa cấu hình Firebase'
+            : _metadataUnavailable || _metadata?['_cached'] == true
+                ? 'Chưa kiểm tra được máy chủ'
+                : 'Máy chủ chưa bật Firebase'),
+        content: SingleChildScrollView(
+          child: Text(appMissing
+              ? 'Cần tạo Firebase project, đăng ký ứng dụng Android với mã vn.giaxang.gia_xang_dau, bật Cloud Messaging rồi truyền FIREBASE_API_KEY, FIREBASE_APP_ID, FIREBASE_MESSAGING_SENDER_ID và FIREBASE_PROJECT_ID khi chạy/build app. Xem mobile/FIREBASE_SETUP.md để làm từng bước.'
+              : _metadataUnavailable || _metadata?['_cached'] == true
+                  ? 'Chưa lấy được trạng thái máy chủ. Hãy kiểm tra kết nối API rồi mở lại Cài đặt.'
+                  : 'App đã có Firebase, nhưng backend chưa bật FCM. Cần cấu hình FIREBASE_ENABLED, FIREBASE_PROJECT_ID và tài khoản dịch vụ Firebase ở backend. Không đưa khóa tài khoản dịch vụ vào ứng dụng mobile.'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Đóng'),
+          ),
+        ],
       ),
     );
-    if (selected == null || !mounted) return;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('region.default', selected);
-    setState(() => region = selected);
+  }
+
+  void _showMessage(String text) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  String _friendlyPushError(Object error) {
+    if (error is StateError) return error.message.toString();
+    return 'Không lưu được cài đặt thông báo. Kiểm tra kết nối rồi thử lại.';
+  }
+
+  String _lastSyncLabel() {
+    final raw = _metadata?['lastSuccessfulSyncAt'];
+    if (raw is! String) return 'Chưa có lần đồng bộ thành công';
+    final date = DateTime.tryParse(raw);
+    if (date == null) return 'Thời gian đồng bộ không hợp lệ';
+    return DateFormat('dd/MM/yyyy HH:mm').format(date.toLocal());
+  }
+
+  String _syncStatus() {
+    if (_metadataUnavailable && _metadata == null) {
+      return 'Không kết nối được máy chủ';
+    }
+    final raw = _metadata?['lastSuccessfulSyncAt'];
+    if (raw is! String) return 'Chưa có dữ liệu đồng bộ';
+    final date = DateTime.tryParse(raw);
+    if (date == null) return 'Không xác định được trạng thái dữ liệu';
+    return DateTime.now().difference(date.toLocal()) <= const Duration(hours: 6)
+        ? 'Đang cập nhật'
+        : 'Lần đồng bộ gần nhất đã quá 6 giờ';
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Cài đặt')),
-        body: ListView(padding: const EdgeInsets.all(16), children: [
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.location_on, color: green),
-              title: const Text('Khu vực mặc định'),
-              subtitle:
-                  Text(region == 'REGION_1' ? 'Toàn quốc (Vùng 1)' : 'Vùng 2'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: _chooseRegion,
+        appBar: AppBar(
+          title: const Text('Cài đặt'),
+          actions: [
+            IconButton(
+              tooltip: 'Tải lại trạng thái',
+              onPressed: _loading
+                  ? null
+                  : () async {
+                      setState(() {
+                        _loading = true;
+                        _metadataUnavailable = false;
+                      });
+                      await _load();
+                    },
+              icon: const Icon(Icons.refresh),
             ),
-          ),
-          const Card(
-            child: ListTile(
-              leading: Icon(Icons.storage, color: green),
-              title: Text('Nguồn dữ liệu'),
-              subtitle: Text('VietFuelAPI • trạng thái từ máy chủ'),
-            ),
-          ),
-          const Card(
-            child: ListTile(
-              leading: Icon(Icons.notifications_off_outlined, color: green),
-              title: Text('Thông báo giá'),
-              subtitle:
-                  Text('Chưa khả dụng cho tới khi cấu hình dịch vụ push.'),
-            ),
-          ),
-          const Card(
-            child: ListTile(
-              leading: Icon(Icons.info_outline, color: green),
-              title: Text('Thông tin dữ liệu'),
-              subtitle: Text('Chỉ hiển thị giá đã được máy chủ xác nhận.'),
-            ),
-          ),
-          const Card(
-            child: ListTile(
-              leading: Icon(Icons.privacy_tip_outlined, color: green),
-              title: Text('Quyền riêng tư'),
-              subtitle: Text('Không yêu cầu tài khoản hoặc vị trí.'),
-            ),
-          ),
-        ]),
+          ],
+        ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(padding: const EdgeInsets.all(16), children: [
+                Card(
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Row(children: [
+                      const Icon(Icons.location_on, color: green),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text('Khu vực mặc định',
+                            style: TextStyle(fontWeight: FontWeight.w600)),
+                      ),
+                      DropdownButton<String>(
+                        value: region,
+                        underline: const SizedBox.shrink(),
+                        items: const [
+                          DropdownMenuItem(
+                              value: 'REGION_1', child: Text('Vùng 1')),
+                          DropdownMenuItem(
+                              value: 'REGION_2', child: Text('Vùng 2')),
+                        ],
+                        onChanged: _chooseRegion,
+                      ),
+                    ]),
+                  ),
+                ),
+                const _SettingsSectionTitle('Dữ liệu giá'),
+                Card(
+                  child: Column(children: [
+                    ListTile(
+                      leading: Icon(
+                        _syncStatus() == 'Đang cập nhật'
+                            ? Icons.cloud_done_outlined
+                            : Icons.cloud_off_outlined,
+                        color: green,
+                      ),
+                      title: const Text('Nguồn dữ liệu'),
+                      subtitle: Text(
+                        '${_metadata?['source'] ?? 'VietFuelAPI'}'
+                        '${_metadata?['upstreamSource'] == null ? '' : ' • ${_metadata?['upstreamSource']}'}\n'
+                        'Trạng thái: ${_syncStatus()}\n'
+                        'Đồng bộ gần nhất: ${_lastSyncLabel()}',
+                      ),
+                      isThreeLine: true,
+                    ),
+                    const Divider(height: 1, indent: 56),
+                    const ListTile(
+                      leading: Icon(Icons.verified_outlined, color: green),
+                      title: Text('Cách hiển thị giá'),
+                      subtitle: Text(
+                        'Chỉ hiển thị giá máy chủ xác nhận. Giá từng nguồn '
+                        'được giữ riêng; xăng dầu tính theo lít, mazut theo kg.',
+                      ),
+                    ),
+                  ]),
+                ),
+                const _SettingsSectionTitle('Thông báo giá mới'),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SwitchListTile.adaptive(
+                          contentPadding: EdgeInsets.zero,
+                          secondary: Icon(
+                            _notificationPreferences.enabled
+                                ? Icons.notifications_active_outlined
+                                : Icons.notifications_off_outlined,
+                            color: green,
+                          ),
+                          title: const Text('Nhận thông báo khi giá thay đổi'),
+                          subtitle: Text(
+                            _savingNotifications
+                                ? 'Đang lưu cài đặt…'
+                                : _metadataUnavailable ||
+                                        _metadata?['_cached'] == true
+                                    ? 'Chưa xác minh được trạng thái máy chủ'
+                                    : !_serverPushAvailable
+                                        ? 'Firebase chưa sẵn sàng ở máy chủ'
+                                        : !pushNotifications.isFirebaseReady
+                                            ? 'Bản ứng dụng chưa nối Firebase'
+                                            : _notificationPreferences.enabled
+                                                ? 'Đã bật trên thiết bị này'
+                                                : 'Đang tắt',
+                          ),
+                          value: _notificationPreferences.enabled,
+                          onChanged: _savingNotifications
+                              ? null
+                              : _setNotificationsEnabled,
+                        ),
+                        if (!_serverPushAvailable ||
+                            !pushNotifications.isFirebaseReady)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton.icon(
+                              onPressed: _showFirebaseSetup,
+                              icon: const Icon(Icons.info_outline),
+                              label: const Text('Cách cấu hình Firebase'),
+                            ),
+                          ),
+                        const Divider(),
+                        DropdownButtonFormField<String>(
+                          initialValue: _notificationPreferences.region,
+                          decoration: const InputDecoration(
+                            labelText: 'Theo dõi giá tại',
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                                value: 'REGION_1', child: Text('Vùng 1')),
+                            DropdownMenuItem(
+                                value: 'REGION_2', child: Text('Vùng 2')),
+                          ],
+                          onChanged: (value) {
+                            if (value != null) {
+                              _saveNotificationPreferences(
+                                _notificationPreferences.copyWith(
+                                    region: value),
+                              );
+                            }
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        const Text('Loại nhiên liệu'),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          children: [
+                            for (final code in allNotificationFuelCodes)
+                              FilterChip(
+                                label: Text(notificationFuelNames[code]!),
+                                selected: _notificationPreferences.fuelCodes
+                                    .contains(code),
+                                onSelected: (selected) {
+                                  final codes = Set<String>.from(
+                                      _notificationPreferences.fuelCodes);
+                                  if (selected) {
+                                    codes.add(code);
+                                  } else {
+                                    codes.remove(code);
+                                  }
+                                  _saveNotificationPreferences(
+                                    _notificationPreferences.copyWith(
+                                        fuelCodes: codes),
+                                  );
+                                },
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        const Text('Thông báo khi giá'),
+                        const SizedBox(height: 8),
+                        SegmentedButton<String>(
+                          showSelectedIcon: false,
+                          segments: const [
+                            ButtonSegment(
+                                value: 'increase', label: Text('Tăng')),
+                            ButtonSegment(
+                                value: 'decrease', label: Text('Giảm')),
+                            ButtonSegment(value: 'both', label: Text('Cả hai')),
+                          ],
+                          selected: {_notificationPreferences.direction},
+                          onSelectionChanged: (selected) {
+                            _saveNotificationPreferences(
+                              _notificationPreferences.copyWith(
+                                  direction: selected.first),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const _SettingsSectionTitle('Ứng dụng và quyền riêng tư'),
+                Card(
+                  child: Column(children: [
+                    ListTile(
+                      leading:
+                          const Icon(Icons.privacy_tip_outlined, color: green),
+                      title: const Text('Quyền riêng tư'),
+                      subtitle: const Text(
+                        'Không cần tài khoản hoặc vị trí. Khi bật thông báo, '
+                        'mã thiết bị Firebase cùng khu vực và loại nhiên liệu '
+                        'đã chọn được lưu để gửi đúng tin giá.',
+                      ),
+                    ),
+                    const Divider(height: 1, indent: 56),
+                    ListTile(
+                      leading: const Icon(Icons.info_outline, color: green),
+                      title: const Text('Giá Xăng Dầu'),
+                      subtitle: Text('Phiên bản ${_appVersion ?? '—'}'),
+                    ),
+                  ]),
+                ),
+              ]),
+      );
+}
+
+class _SettingsSectionTitle extends StatelessWidget {
+  const _SettingsSectionTitle(this.title);
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(4, 16, 4, 6),
+        child: Text(
+          title,
+          style: Theme.of(context)
+              .textTheme
+              .titleSmall
+              ?.copyWith(color: greenDark, fontWeight: FontWeight.bold),
+        ),
       );
 }
 

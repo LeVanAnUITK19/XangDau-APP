@@ -8,6 +8,7 @@ import pino from "pino";
 import mongoose from "mongoose";
 import { config } from "./config";
 import { Device, fuels, LatestPrice, PriceRecord, SyncState } from "./models";
+import { selectHistoryWindow } from "./history";
 
 export const logger = pino({
   level: config.LOG_LEVEL,
@@ -214,40 +215,15 @@ app.get("/api/v1/history", requireDb, async (req, res, next) => {
         String(req.query.period ?? "30d")
       ] ?? 30;
     const from = new Date(Date.now() - days * 86400_000);
-    const carry = await PriceRecord.findOne({
+    const records = await PriceRecord.find({
       fuelCode,
       region,
-      $or: [
-        { effectiveAt: { $lt: from } },
-        {
-          effectiveAt: null,
-          effectiveDate: { $lt: from.toISOString().slice(0, 10) },
-        },
-      ],
+      source: config.UPSTREAM_SOURCE,
     })
-      .sort({ effectiveAt: -1, effectiveDate: -1 })
+      .sort({ effectiveAt: -1, effectiveDate: -1, observedAt: -1 })
+      .limit(5000)
       .lean();
-    const rows = await PriceRecord.find({
-      fuelCode,
-      region,
-      $or: [
-        { effectiveAt: { $gte: from } },
-        {
-          effectiveAt: null,
-          effectiveDate: { $gte: from.toISOString().slice(0, 10) },
-        },
-      ],
-    })
-      .sort({ effectiveAt: 1, effectiveDate: 1 })
-      .lean();
-    const series = [...(carry ? [carry] : []), ...rows];
-    const dates = series.flatMap((r) =>
-      r.effectiveAt
-        ? [r.effectiveAt]
-        : r.effectiveDate
-          ? [new Date(`${r.effectiveDate}T00:00:00Z`)]
-          : [],
-    );
+    const { records: series, dates } = selectHistoryWindow(records, from);
     const sync = await SyncState.findOne({ key: "prices" }).lean();
     ok(
       res,
@@ -319,7 +295,14 @@ app.get("/api/v1/metadata", requireDb, async (_req, res, next) => {
   try {
     ok(res, {
       source: "VietFuelAPI",
+      upstreamSource: config.UPSTREAM_SOURCE,
       sourceUrl: config.UPSTREAM_BASE_URL ?? null,
+      notificationsAvailable:
+        config.FIREBASE_ENABLED === "true" &&
+        Boolean(
+          config.FIREBASE_PROJECT_ID &&
+          config.FIREBASE_SERVICE_ACCOUNT_JSON_BASE64,
+        ),
       lastSuccessfulSyncAt:
         (await SyncState.findOne({ key: "prices" }).lean())
           ?.lastSuccessfulSyncAt ?? null,
