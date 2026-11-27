@@ -58,6 +58,25 @@ class _PricesScreenState extends State<PricesScreen> {
   Future<Map<String, dynamic>> _load() =>
       api.cachedGet('/api/v1/prices/latest', query: {'region': region});
 
+  void _reloadPrices() {
+    final next = _load();
+    setState(() {
+      future = next;
+    });
+  }
+
+  Future<void> _refreshPrices() async {
+    final next = _load();
+    setState(() {
+      future = next;
+    });
+    try {
+      await next;
+    } on Object {
+      // FutureBuilder renders the existing error state for this request.
+    }
+  }
+
   Future<void> _chooseRegion() async {
     final selected = await showModalBottomSheet<String>(
       context: context,
@@ -97,7 +116,7 @@ class _PricesScreenState extends State<PricesScreen> {
           ],
         ),
         body: RefreshIndicator(
-          onRefresh: () async => setState(() => future = _load()),
+          onRefresh: _refreshPrices,
           child: ListView(padding: const EdgeInsets.all(16), children: [
             Card(
               child: ListTile(
@@ -121,7 +140,7 @@ class _PricesScreenState extends State<PricesScreen> {
                 if (snapshot.hasError) {
                   return ErrorState(
                     message: 'Không tải được giá. Kiểm tra kết nối máy chủ.',
-                    retry: () => setState(() => future = _load()),
+                    retry: _reloadPrices,
                   );
                 }
                 final response = snapshot.data!;
