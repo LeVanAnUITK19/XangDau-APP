@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import mongoose from "mongoose";
-import { normalizePayload } from "../src/sync";
+import { assertFreshUpstream, normalizePayload } from "../src/sync";
 
 describe("upstream normalization", () => {
   it("normalizes VietFuelAPI's documented region1/region2 price rows", () => {
@@ -152,6 +152,20 @@ describe("upstream normalization", () => {
     expect(() =>
       normalizePayload([{ code: "X", price: -1, region: "Vùng 1" }]),
     ).toThrow();
+  });
+  it("rejects stale Worker cache instead of marking it newly synchronized", () => {
+    expect(() =>
+      assertFreshUpstream({
+        meta: { isStale: true },
+        data: [{ price: 22980 }],
+      }),
+    ).toThrow("Upstream returned stale fuel prices");
+    expect(() =>
+      assertFreshUpstream({
+        meta: { isStale: false },
+        data: [{ price: 22980 }],
+      }),
+    ).not.toThrow();
   });
 });
 

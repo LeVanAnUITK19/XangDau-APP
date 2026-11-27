@@ -6,7 +6,7 @@ class FuelApi {
   FuelApi()
       : dio = Dio(BaseOptions(
             baseUrl: const String.fromEnvironment('API_BASE_URL',
-                defaultValue: 'http://10.0.2.2:3000'),
+                defaultValue: 'https://viet-fuel-api.onrender.com'),
             connectTimeout: const Duration(seconds: 12),
             receiveTimeout: const Duration(seconds: 20),
             headers: {'Accept': 'application/json'}));

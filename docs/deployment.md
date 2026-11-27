@@ -25,12 +25,18 @@ Set repository variable `BACKEND_URL` to the Render origin and repository secret
 
 ## Mobile
 
-Set `API_BASE_URL` at build time:
+The app defaults to the deployed API at `https://viet-fuel-api.onrender.com`.
+Override `API_BASE_URL` only when pointing at a local development backend:
 
 ```sh
-flutter run --dart-define=API_BASE_URL=https://your-service.onrender.com
-flutter build apk --release --dart-define=API_BASE_URL=https://your-service.onrender.com
-flutter build appbundle --release --dart-define=API_BASE_URL=https://your-service.onrender.com
+flutter run --dart-define=API_BASE_URL=http://10.0.2.2:3000
+```
+
+Production builds can use the default URL:
+
+```sh
+flutter build apk --release
+flutter build appbundle --release
 ```
 
 iOS builds require macOS/Xcode and signing setup. Firebase project credentials and push configuration are not currently wired into the app.

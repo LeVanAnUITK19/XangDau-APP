@@ -136,6 +136,12 @@ export function normalizePayload(payload: unknown): NormalizedPrice[] {
   return out;
 }
 
+export function assertFreshUpstream(payload: unknown): void {
+  const meta = (payload as { meta?: { isStale?: unknown } } | null)?.meta;
+  if (meta?.isStale === true)
+    throw new Error("Upstream returned stale fuel prices; sync skipped");
+}
+
 export async function syncPrices(fetcher: typeof fetch = fetch): Promise<{
   updated: number;
   unchanged: number;
@@ -198,7 +204,9 @@ export async function syncPrices(fetcher: typeof fetch = fetch): Promise<{
     }
     if (!response.ok)
       throw new Error(`Upstream request failed (${response.status})`);
-    const normalized = normalizePayload(await response.json());
+    const payload: unknown = await response.json();
+    assertFreshUpstream(payload);
+    const normalized = normalizePayload(payload);
     let updated = 0;
     let unchanged = 0;
     for (const item of normalized) {
