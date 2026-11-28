@@ -21,7 +21,7 @@ Connect the Git repository and create a Blueprint from `render.yaml`. Add `MONGO
 
 ## GitHub Actions sync
 
-Set repository variable `BACKEND_URL` to the Render origin and repository secret `SYNC_SECRET` to the same secret configured on Render. `fuel-price-sync.yml` runs every two hours at minute 17 UTC (not Vietnam time) and supports manual dispatch. Schedules may be delayed or disabled for inactive repositories.
+Set repository variable `BACKEND_URL` to the Render origin and repository secret `SYNC_SECRET` to the same secret configured on Render. `fuel-price-sync.yml` runs every 15 minutes (UTC) and supports manual dispatch. Schedules may be delayed or disabled for inactive repositories.
 
 ## Mobile
 
